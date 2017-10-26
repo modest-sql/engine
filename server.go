@@ -4,6 +4,8 @@ import (
     "fmt"
     "net"
     "os"
+    "github.com/modest-sql/parser"
+    "bytes"
 )
 
 const (
@@ -44,9 +46,27 @@ func handleRequest(conn net.Conn) {
   if err != nil {
     fmt.Println("Error reading:", err.Error())
   }
+
+    reader := bytes.NewReader(buf[:bufferLength])
+
+  err = parser.Parse(reader)
+
+  fmt.Println("Success on parse")
+
   fmt.Println(string(buf[:bufferLength]))
   // Send a response back to person contacting us.
-  conn.Write([]byte("[{\"Name\":\"Jesus\",\"Age\":\"23\",\"Job\":\"Meme master\"},{\"Name\":\"Soware\",\"Age\":\"22\",\"Job\":\"Asaber\"},{\"Name\":\"FEC\",\"Age\":\"21\",\"Job\":\"Zizizi\"}]"))
+
+  var counter int
+
+    if err != nil {
+        counter, _ = conn.Write([]byte("{\"Error\":\"" + err.Error() + "\"}"))
+    } else {
+        counter, _ = conn.Write([]byte("[{\"Error\":\"" + "no error" + "\"}]"))
+    }
+
+  fmt.Printf("Success on send, sent: ", counter)
+
+  //conn.Write([]byte("[{\"Name\":\"Jesus\",\"Age\":\"23\",\"Job\":\"Meme master\"},{\"Name\":\"Soware\",\"Age\":\"22\",\"Job\":\"Asaber\"},{\"Name\":\"FEC\",\"Age\":\"21\",\"Job\":\"Zizizi\"}]"))
   // Close the connection when you're done with it.
   conn.Close()
 }
