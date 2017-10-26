@@ -59,7 +59,7 @@ func handleRequest(conn net.Conn) {
   var counter int
 
     if err != nil {
-        counter, _ = conn.Write([]byte("{\"Error\":\"" + err.Error() + "\"}"))
+        counter, _ = conn.Write([]byte("[{\"Error\":\"" + err.Error() + "\"}]"))
     } else {
         counter, _ = conn.Write([]byte("[{\"Error\":\"" + "no error" + "\"}]"))
     }
