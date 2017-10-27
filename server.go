@@ -49,14 +49,14 @@ func handleRequest(conn net.Conn) {
 
     reader := bytes.NewReader(buf[:bufferLength])
 
-  err = parser.Parse(reader)
+    _ , err = parser.Parse(reader)
 
   fmt.Println("Success on parse")
 
   fmt.Println(string(buf[:bufferLength]))
   // Send a response back to person contacting us.
 
-  var counter int
+    var counter int
 
     if err != nil {
         counter, _ = conn.Write([]byte("[{\"Error\":\"" + err.Error() + "\"}]"))
