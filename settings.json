@@ -1,0 +1,6 @@
+
+{
+    "DatabaseHost" : "",
+    "DatabasePort" : "3333",
+    "DatabaseRoot" : "/databases/"
+}
