@@ -24,6 +24,11 @@ type config struct {
 	DatabaseRoot string
 }
 
+type databaseMeta struct {
+	DatabaseName string        `json:"DB_Name"`
+	Tables       []*data.Table `json:"Tables"`
+}
+
 func loadConfig(path string) (c config) {
 	raw, err := ioutil.ReadFile(path)
 	if err != nil {
@@ -57,27 +62,34 @@ func handleRequest(server *network.Server, request network.Request) {
 	case network.NewTable:
 	case network.FindTable:
 	case network.GetMetadata:
-		databaseTemp, ok := databases.Load(request.SessionID)
-		if !ok {
-			return
-		}
 
-		type Database struct {
-			DbNAme string        `json:"DB_Name"`
-			Tables []*data.Table `json:"Tables"`
-		}
-
-		tables, err := databaseTemp.(database).databasePointer.AllTables()
+		databasesFiles, err := listDatabases("./databases/")
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		datab := Database{databaseTemp.(database).databaseName, tables}
-		c, err := json.Marshal(datab)
+
+		databaseMetaArray := make([]databaseMeta, 0)
+		for _, databaseFile := range databasesFiles {
+
+			db, err := data.LoadDatabase(databaseFile.Name())
+			if err != nil {
+				fmt.Println("Error loading database ", databaseFile.Name(), err)
+				return
+			}
+			tables, err := db.AllTables()
+			if err != nil {
+				fmt.Println("Error geting tables", databaseFile.Name(), err)
+				return
+			}
+			databaseMetaArray = append(databaseMetaArray, databaseMeta{DatabaseName: databaseFile.Name(), Tables: tables})
+		}
+
+		databaseMetaArrayJSON, err := json.Marshal(databaseMetaArray)
 		if err != nil {
 			fmt.Println("Error encoding metadata:", err)
 		}
-		server.Send(request.SessionID, network.Response{Type: network.GetMetadata, Data: string(c)})
+		server.Send(request.SessionID, network.Response{Type: network.GetMetadata, Data: "{Databases:" + string(databaseMetaArrayJSON) + "}"})
 
 	case network.Query:
 		databaseTemp, ok := databases.Load(request.SessionID)
@@ -158,6 +170,11 @@ type database struct {
 }
 
 var databases sync.Map
+
+func listDatabases(path string) ([]os.FileInfo, error) {
+	files, err := ioutil.ReadDir(path)
+	return files, err
+}
 
 func main() {
 	fmt.Println("Starting server")
