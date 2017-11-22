@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/modest-sql/common"
@@ -38,37 +39,40 @@ func handleRequest(server *network.Server, request network.Request) {
 	case network.KeepAlive:
 		server.Send(request.SessionID, network.Response{Type: network.KeepAlive, Data: "Alive"})
 	case network.NewDatabase:
-		var err error
-		databaseName = request.Response.Data
-		database, err = data.NewDatabase(databaseName)
+		name := request.Response.Data
+		db, err := data.NewDatabase(name)
 		if err != nil {
 			fmt.Print(err)
 			return
 		}
-
+		databases.Store(request.SessionID, database{databasePointer: db, databaseName: name})
 	case network.LoadDatabase:
-		var err error
-		databaseName = request.Response.Data
-		database, err = data.LoadDatabase(databaseName)
+		name := request.Response.Data
+		db, err := data.LoadDatabase(name)
 		if err != nil {
 			fmt.Print(err)
 			return
 		}
-
+		databases.Store(request.SessionID, database{databasePointer: db, databaseName: name})
 	case network.NewTable:
 	case network.FindTable:
 	case network.GetMetadata:
+		databaseTemp, ok := databases.Load(request.SessionID)
+		if !ok {
+			return
+		}
+
 		type Database struct {
 			DbNAme string        `json:"DB_Name"`
 			Tables []*data.Table `json:"Tables"`
 		}
 
-		tables, err := database.AllTables()
+		tables, err := databaseTemp.(database).databasePointer.AllTables()
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		datab := Database{databaseName, tables}
+		datab := Database{databaseTemp.(database).databaseName, tables}
 		c, err := json.Marshal(datab)
 		if err != nil {
 			fmt.Println("Error encoding metadata:", err)
@@ -76,6 +80,10 @@ func handleRequest(server *network.Server, request network.Request) {
 		server.Send(request.SessionID, network.Response{Type: network.GetMetadata, Data: string(c)})
 
 	case network.Query:
+		databaseTemp, ok := databases.Load(request.SessionID)
+		if !ok {
+			return
+		}
 		reader := bytes.NewReader([]byte(request.Response.Data))
 		commands, err := parser.Parse(reader)
 		if err != nil {
@@ -120,7 +128,8 @@ func handleRequest(server *network.Server, request network.Request) {
 					server.Send(request.SessionID, network.Response{Type: network.Query, Data: string(resultJSON)})
 				}
 			}
-			commandsArray = append(commandsArray, database.CommandFactory(command, function))
+			commandsArray = append(commandsArray, databaseTemp.(database).databasePointer.CommandFactory(command, function))
+
 		}
 
 		transaction.AddCommands(commandsArray)
@@ -133,6 +142,8 @@ func handleRequest(server *network.Server, request network.Request) {
 		}
 		server.Send(request.SessionID, network.Response{Type: network.ShowTransaction, Data: "{Transactions:" + string(transactionsJSON) + "}"})
 	case network.Error:
+	case network.SessionExited:
+		databases.Delete(request.SessionID)
 	}
 
 }
@@ -141,8 +152,12 @@ func init() {
 	go transaction.StartTransactionManager()
 }
 
-var database *data.Database
-var databaseName string
+type database struct {
+	databasePointer *data.Database
+	databaseName    string
+}
+
+var databases sync.Map
 
 func main() {
 	fmt.Println("Starting server")
