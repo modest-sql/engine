@@ -9,6 +9,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/modest-sql/common"
+
 	"github.com/modest-sql/data"
 	"github.com/modest-sql/network"
 	"github.com/modest-sql/parser"
@@ -36,16 +38,22 @@ func handleRequest(server *network.Server, request network.Request) {
 	case network.KeepAlive:
 		server.Send(request.SessionID, network.Response{Type: network.KeepAlive, Data: "Alive"})
 	case network.NewDatabase:
-
-	case network.LoadDatabase:
-
+		var err error
 		databaseName = request.Response.Data
-		database, err := data.LoadDatabase(databaseName)
+		database, err = data.NewDatabase(databaseName)
 		if err != nil {
 			fmt.Print(err)
 			return
 		}
-		go transaction.StartTransactionManager(database)
+
+	case network.LoadDatabase:
+		var err error
+		databaseName = request.Response.Data
+		database, err = data.LoadDatabase(databaseName)
+		if err != nil {
+			fmt.Print(err)
+			return
+		}
 
 	case network.NewTable:
 	case network.FindTable:
@@ -70,30 +78,67 @@ func handleRequest(server *network.Server, request network.Request) {
 	case network.Query:
 		reader := bytes.NewReader([]byte(request.Response.Data))
 		commands, err := parser.Parse(reader)
-
-		transaction.AddTransactionToManager(transaction.NewTransaction(commands))
-
 		if err != nil {
-			server.Send(request.SessionID, network.Response{Type: network.Error, Data: "[{\"Error\":\"" + err.Error() + "\"}]"})
+			server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
 			return
 		}
 
+		commandsArray := make([]common.Command, 0)
+
+		for _, command := range commands {
+			var function func(interface{}, error)
+			switch command.(type) {
+			case *common.AlterTableCommand:
+			case *common.CreateTableCommand:
+				function = func(result interface{}, err error) {
+					if err != nil {
+						server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
+						return
+					}
+					table := result.(*data.Table)
+					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Table Created " + table.TableName})
+				}
+			case *common.DeleteCommand:
+			case *common.DropTableCommand:
+			case *common.InsertCommand:
+				function = func(result interface{}, err error) {
+					if err != nil {
+						server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
+						return
+					}
+					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Data Inserted"})
+				}
+			case *common.UpdateTableCommand:
+			case *common.SelectTableCommand:
+				function = func(result interface{}, err error) {
+					if err != nil {
+						server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
+						return
+					}
+					resultset := result.(*data.ResultSet)
+					resultJSON, _ := json.Marshal(resultset.Rows)
+					server.Send(request.SessionID, network.Response{Type: network.Query, Data: string(resultJSON)})
+				}
+			}
+			commandsArray = append(commandsArray, database.CommandFactory(command, function))
+		}
+
+		transaction.AddCommands(commandsArray)
+
 	case network.ShowTransaction:
+		transactions := transaction.GetTransactions()
+		transactionsJSON, err := json.Marshal(transactions)
+		if err != nil {
+			fmt.Println(err)
+		}
+		server.Send(request.SessionID, network.Response{Type: network.ShowTransaction, Data: "{Transactions:" + string(transactionsJSON) + "}"})
+	case network.Error:
 	}
 
 }
 
-func handleIncoming(server *network.Server) {
-	go func() {
-		for {
-			select {
-			case IncomingRequest := <-server.RequestQueue:
-				go handleRequest(server, IncomingRequest)
-				//case TRChannel := <-transaction.TRChannel:
-				//do something with the transaction result
-			}
-		}
-	}()
+func init() {
+	go transaction.StartTransactionManager()
 }
 
 var database *data.Database
@@ -102,7 +147,16 @@ var databaseName string
 func main() {
 	fmt.Println("Starting server")
 	server := network.NewServer()
-	handleIncoming(server)
+
+	go func() {
+		for {
+			select {
+			case IncomingRequest := <-server.RequestQueue:
+				go handleRequest(server, IncomingRequest)
+			}
+		}
+	}()
+
 	listener, err := net.Listen("tcp", ":3333")
 	if err != nil {
 		fmt.Println("Server Listener failed. Exiting.", err)
