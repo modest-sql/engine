@@ -2,5 +2,5 @@
 {
     "DatabaseHost" : "",
     "DatabasePort" : "3333",
-    "DatabaseRoot" : "/databases/"
+    "DatabaseRoot" : "./databases/"
 }

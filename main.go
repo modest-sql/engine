@@ -29,6 +29,13 @@ type databaseMeta struct {
 	Tables       []*data.Table `json:"Tables"`
 }
 
+type database struct {
+	databasePointer *data.Database
+	databaseName    string
+}
+
+var databases sync.Map
+
 func loadConfig(path string) (c config) {
 	raw, err := ioutil.ReadFile(path)
 	if err != nil {
@@ -94,6 +101,7 @@ func handleRequest(server *network.Server, request network.Request) {
 	case network.Query:
 		databaseTemp, ok := databases.Load(request.SessionID)
 		if !ok {
+			server.Send(request.SessionID, network.Response{Type: network.Error, Data: "No active databse selected."})
 			return
 		}
 		reader := bytes.NewReader([]byte(request.Response.Data))
@@ -155,7 +163,10 @@ func handleRequest(server *network.Server, request network.Request) {
 		server.Send(request.SessionID, network.Response{Type: network.ShowTransaction, Data: "{Transactions:" + string(transactionsJSON) + "}"})
 	case network.Error:
 	case network.SessionExited:
-		databases.Delete(request.SessionID)
+		_, ok := databases.Load(request.SessionID)
+		if ok {
+			databases.Delete(request.SessionID)
+		}
 	}
 
 }
@@ -163,13 +174,6 @@ func handleRequest(server *network.Server, request network.Request) {
 func init() {
 	go transaction.StartTransactionManager()
 }
-
-type database struct {
-	databasePointer *data.Database
-	databaseName    string
-}
-
-var databases sync.Map
 
 func listDatabases(path string) ([]os.FileInfo, error) {
 	files, err := ioutil.ReadDir(path)
