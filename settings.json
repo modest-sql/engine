@@ -1,6 +1,7 @@
 
 {
-    "DatabaseHost" : "",
-    "DatabasePort" : "3333",
-    "DatabaseRoot" : "./databases/"
+    "Host" : "",
+    "Port" : "3333",
+    "Root" : "./databases/",
+    "MaxSessions"  : 1
 }

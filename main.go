@@ -19,9 +19,10 @@ import (
 )
 
 type config struct {
-	DatabaseHost string
-	DatabasePort string
-	DatabaseRoot string
+	Host        string
+	Port        string
+	Root        string
+	MaxSessions int
 }
 
 type databaseMeta struct {
@@ -35,6 +36,7 @@ type database struct {
 }
 
 var databases sync.Map
+var settings = loadConfig("settings.json")
 
 func loadConfig(path string) (c config) {
 	raw, err := ioutil.ReadFile(path)
@@ -70,7 +72,7 @@ func handleRequest(server *network.Server, request network.Request) {
 	case network.FindTable:
 	case network.GetMetadata:
 
-		databasesFiles, err := listDatabases("./databases/")
+		databasesFiles, err := listDatabases(settings.Root)
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -193,20 +195,23 @@ func main() {
 		}
 	}()
 
-	listener, err := net.Listen("tcp", ":3333")
+	listener, err := net.Listen("tcp", settings.Host+":"+settings.Port)
 	if err != nil {
 		fmt.Println("Server Listener failed. Exiting.", err)
 		os.Exit(1)
 	}
+
 	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			fmt.Println("Connection accepting failed.")
-			conn.Close()
-			time.Sleep(100 * time.Millisecond)
-			continue
+		if settings.MaxSessions > server.GetSessionsAmount() {
+			conn, err := listener.Accept()
+			if err != nil {
+				fmt.Println("Connection accepting failed.")
+				conn.Close()
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			fmt.Println("A new connection accepted.")
+			server.Join(conn)
 		}
-		fmt.Println("A new connection accepted.")
-		server.Join(conn)
 	}
 }
