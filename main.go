@@ -118,7 +118,6 @@ func handleRequest(server *network.Server, request network.Request) {
 		for _, command := range commands {
 			var function func(interface{}, error)
 			switch command.(type) {
-			case *common.AlterTableCommand:
 			case *common.CreateTableCommand:
 				function = func(result interface{}, err error) {
 					if err != nil {
@@ -129,7 +128,6 @@ func handleRequest(server *network.Server, request network.Request) {
 					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Table Created " + table.TableName})
 				}
 			case *common.DeleteCommand:
-			case *common.DropTableCommand:
 			case *common.InsertCommand:
 				function = func(result interface{}, err error) {
 					if err != nil {
