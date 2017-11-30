@@ -3,5 +3,5 @@
     "Host" : "",
     "Port" : "3333",
     "Root" : "./databases/",
-    "MaxSessions"  : 1
+    "MaxSessions"  : 10
 }

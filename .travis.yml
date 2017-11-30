@@ -1,0 +1,5 @@
+language: go
+
+go:
+  - 1.9.3
+  - develop
