@@ -88,14 +88,9 @@ func (DBM *DBManager) unpair(sessionID int64) (err error) {
 
 //GetPair gets the linked db pointer that was paired with id
 func (DBM *DBManager) getPair(sessionID int64) (*data.Database, error) {
-	dbname, ok := DBM.paired.Load(sessionID)
-
+	dbpointer, ok := DBM.paired.Load(sessionID)
 	if ok {
-		dbpointer, ok := DBM.databases.Load(dbname.(string))
-		if ok {
-			return dbpointer.(*data.Database), nil
-		}
-		return nil, errors.New("paired database not found")
+		return dbpointer.(*data.Database), nil
 	}
 	return nil, errors.New("No active database selected")
 }
