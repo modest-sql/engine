@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -19,6 +20,95 @@ import (
 	"github.com/modest-sql/transaction"
 )
 
+//DBManager implements simple CRUD functions to manage databases
+type DBManager struct {
+	databases sync.Map
+	paired    sync.Map
+}
+
+type databaseMeta struct {
+	DatabaseName string        `json:"DB_Name"`
+	Tables       []*data.Table `json:"Tables"`
+}
+
+func (DBM *DBManager) getMetadata() (databaseMetaArray []databaseMeta) {
+	DBM.databases.Range(func(ki, vi interface{}) bool {
+		k, v := ki.(string), vi.(*data.Database)
+		databaseMetaArray = append(databaseMetaArray, databaseMeta{DatabaseName: k, Tables: v.AllTables()})
+		return true
+	})
+	return
+}
+
+//LoadAllDatabases loads all the existing databses files into memory
+func (DBM *DBManager) loadAllDatabases(path string) (err error) {
+	databasesFiles, err := listDatabases(path)
+	if err != nil {
+		return err
+	}
+	for _, databaseFile := range databasesFiles {
+		db, err := data.LoadDatabase(filepath.Join(path, databaseFile.Name()))
+		if err != nil {
+			return err
+		}
+		DBM.databases.Store(databaseFile.Name(), db)
+	}
+	return nil
+}
+
+//CreateDatabase creates a new databse and pairs it to the session
+func (DBM *DBManager) createDatabase(sessionID int64, name string, path string, blocksize int64) (err error) {
+	db, err := data.NewDatabase(filepath.Join(path, name), blocksize)
+	if err != nil {
+		return err
+	}
+	DBM.databases.Store(name, db)
+	return DBM.pair(sessionID, name)
+}
+
+//Pair pairs a session with a loaded database
+func (DBM *DBManager) pair(sessionID int64, name string) (err error) {
+	databasePointer, ok := DBM.databases.Load(name)
+	if !ok {
+		return errors.New("Error pairing, Database isn't loaded or doesnt exist")
+	}
+	DBM.paired.Store(sessionID, databasePointer)
+	return nil
+}
+
+//Unpair deletes the relation between a session and a database
+func (DBM *DBManager) unpair(sessionID int64) (err error) {
+	_, ok := DBM.paired.Load(sessionID)
+	if ok {
+		DBM.paired.Delete(sessionID)
+		return nil
+	}
+	return errors.New("Database specified wasn't found")
+}
+
+//GetPair gets the linked db pointer that was paired with id
+func (DBM *DBManager) getPair(sessionID int64) (interface{}, error) {
+	dbname, ok := DBM.paired.Load(sessionID)
+	if ok {
+		dbpointer, ok := DBM.databases.Load(dbname)
+		if ok {
+			return dbpointer, nil
+		}
+		return nil, errors.New("paired database not found")
+	}
+	return nil, errors.New("No active database selected")
+}
+
+func listDatabases(path string) ([]os.FileInfo, error) {
+	files, err := ioutil.ReadDir(path)
+	return files, err
+}
+
+func deleteDatabase(name string, path string) error {
+	err := os.Remove(filepath.Join(path, name))
+	return err
+}
+
 type config struct {
 	Host        string
 	Port        string
@@ -27,17 +117,7 @@ type config struct {
 	BlockSize   int64
 }
 
-type databaseMeta struct {
-	DatabaseName string        `json:"DB_Name"`
-	Tables       []*data.Table `json:"Tables"`
-}
-
-type database struct {
-	databasePointer *data.Database
-	databaseName    string
-}
-
-var databases sync.Map
+var dbmanager DBManager
 var settings = loadConfig("settings.json")
 
 func loadConfig(path string) (c config) {
@@ -55,58 +135,30 @@ func handleRequest(server *network.Server, request network.Request) {
 	case network.KeepAlive:
 		server.Send(request.SessionID, network.Response{Type: network.KeepAlive, Data: "Alive"})
 	case network.NewDatabase:
-		name := request.Response.Data
-		db, err := data.NewDatabase(filepath.Join(settings.Root, name), settings.BlockSize)
+		err := dbmanager.createDatabase(request.SessionID, request.Response.Data, settings.Root, settings.BlockSize)
 		if err != nil {
-			fmt.Print(err)
+			server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
 			return
 		}
-		databases.Store(request.SessionID, database{databasePointer: db, databaseName: name})
 	case network.LoadDatabase:
-		name := request.Response.Data
-		db, err := data.LoadDatabase(filepath.Join(settings.Root, name))
+		err := dbmanager.pair(request.SessionID, request.Response.Data)
 		if err != nil {
-			fmt.Print(err)
+			server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
 			return
 		}
-		databases.Store(request.SessionID, database{databasePointer: db, databaseName: name})
 	case network.NewTable:
 	case network.FindTable:
 	case network.GetMetadata:
-		fmt.Println("getting metadata")
-		databasesFiles, err := listDatabases(settings.Root)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		fmt.Println("printing databse")
-		for _, databaseFile := range databasesFiles {
-			fmt.Println(databaseFile.Name())
-		}
-
-		databaseMetaArray := make([]databaseMeta, 0)
-		for _, databaseFile := range databasesFiles {
-			fmt.Println("sending:", filepath.Join(settings.Root, databaseFile.Name()))
-			db, err := data.LoadDatabase(filepath.Join(settings.Root, databaseFile.Name()))
-			if err != nil {
-				fmt.Println("Error loading database ", databaseFile.Name(), err)
-				return
-			}
-			tables := db.AllTables()
-			databaseMetaArray = append(databaseMetaArray, databaseMeta{DatabaseName: databaseFile.Name(), Tables: tables})
-		}
-
+		databaseMetaArray := dbmanager.getMetadata()
 		databaseMetaArrayJSON, err := json.Marshal(databaseMetaArray)
 		if err != nil {
 			fmt.Println("Error encoding metadata:", err)
 		}
 		server.Send(request.SessionID, network.Response{Type: network.GetMetadata, Data: "{Databases:" + string(databaseMetaArrayJSON) + "}"})
-
 	case network.Query:
-		databaseTemp, ok := databases.Load(request.SessionID)
-		if !ok {
-			server.Send(request.SessionID, network.Response{Type: network.Error, Data: "No active databse selected."})
+		databaseTemp, err := dbmanager.getPair(request.SessionID)
+		if err != nil {
+			server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
 			return
 		}
 		reader := bytes.NewReader([]byte(request.Response.Data))
@@ -172,7 +224,7 @@ func handleRequest(server *network.Server, request network.Request) {
 					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Table Dropped"})
 				}
 			}
-			commandsArray = append(commandsArray, databaseTemp.(database).databasePointer.CommandFactory(command, function))
+			commandsArray = append(commandsArray, databaseTemp.(*data.Database).CommandFactory(command, function))
 
 		}
 
@@ -187,13 +239,13 @@ func handleRequest(server *network.Server, request network.Request) {
 		server.Send(request.SessionID, network.Response{Type: network.ShowTransaction, Data: "{Transactions:" + string(transactionsJSON) + "}"})
 	case network.Error:
 	case network.SessionExited:
-		_, ok := databases.Load(request.SessionID)
-		if ok {
-			databases.Delete(request.SessionID)
+		err := dbmanager.unpair(request.SessionID)
+		if err != nil {
+			fmt.Println(err)
+			return
 		}
 	case network.DropDb:
-		name := request.Response.Data
-		err := deleteDatabase(name)
+		err := deleteDatabase(request.Response.Data, settings.Root)
 		if err != nil {
 			fmt.Print(err)
 			return
@@ -206,17 +258,13 @@ func init() {
 	go transaction.StartTransactionManager()
 }
 
-func listDatabases(path string) ([]os.FileInfo, error) {
-	files, err := ioutil.ReadDir(path)
-	return files, err
-}
-
-func deleteDatabase(name string) error {
-	err := os.Remove(filepath.Join(settings.Root, name))
-	return err
-}
-
 func main() {
+	fmt.Println("Loading Databases")
+	err := dbmanager.loadAllDatabases(settings.Root)
+	if err != nil {
+		fmt.Println("Error loading databses. Exiting", err)
+		return
+	}
 
 	fmt.Println("Starting server")
 	server := network.NewServer()
