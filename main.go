@@ -87,12 +87,13 @@ func (DBM *DBManager) unpair(sessionID int64) (err error) {
 }
 
 //GetPair gets the linked db pointer that was paired with id
-func (DBM *DBManager) getPair(sessionID int64) (interface{}, error) {
+func (DBM *DBManager) getPair(sessionID int64) (*data.Database, error) {
 	dbname, ok := DBM.paired.Load(sessionID)
+
 	if ok {
-		dbpointer, ok := DBM.databases.Load(dbname)
+		dbpointer, ok := DBM.databases.Load(dbname.(string))
 		if ok {
-			return dbpointer, nil
+			return dbpointer.(*data.Database), nil
 		}
 		return nil, errors.New("paired database not found")
 	}
@@ -224,7 +225,7 @@ func handleRequest(server *network.Server, request network.Request) {
 					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Table Dropped"})
 				}
 			}
-			commandsArray = append(commandsArray, databaseTemp.(*data.Database).CommandFactory(command, function))
+			commandsArray = append(commandsArray, databaseTemp.CommandFactory(command, function))
 
 		}
 
