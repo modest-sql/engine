@@ -132,8 +132,7 @@ func handleRequest(server *network.Server, request network.Request) {
 						server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
 						return
 					}
-					table := result.(*data.Table)
-					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Table Created " + table.TableName})
+					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Table Created"})
 				}
 			case *common.DeleteCommand:
 			case *common.InsertCommand:
