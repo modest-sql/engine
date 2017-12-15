@@ -130,6 +130,13 @@ func handleRequest(server *network.Server, request network.Request) {
 					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Table Created"})
 				}
 			case *common.DeleteCommand:
+				function = func(result interface{}, err error) {
+					if err != nil {
+						server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
+						return
+					}
+					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Data Deleted"})
+				}
 			case *common.InsertCommand:
 				function = func(result interface{}, err error) {
 					if err != nil {
@@ -139,6 +146,13 @@ func handleRequest(server *network.Server, request network.Request) {
 					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Data Inserted"})
 				}
 			case *common.UpdateTableCommand:
+				function = func(result interface{}, err error) {
+					if err != nil {
+						server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
+						return
+					}
+					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Data Updated"})
+				}
 			case *common.SelectTableCommand:
 				function = func(result interface{}, err error) {
 					if err != nil {
@@ -148,6 +162,14 @@ func handleRequest(server *network.Server, request network.Request) {
 
 					resultJSON, _ := json.Marshal(result)
 					server.Send(request.SessionID, network.Response{Type: network.Query, Data: string(resultJSON)})
+				}
+			case *common.DropCommand:
+				function = func(result interface{}, err error) {
+					if err != nil {
+						server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
+						return
+					}
+					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Table Dropped"})
 				}
 			}
 			commandsArray = append(commandsArray, databaseTemp.(database).databasePointer.CommandFactory(command, function))
