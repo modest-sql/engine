@@ -64,7 +64,7 @@ func handleRequest(server *network.Server, request network.Request) {
 		databases.Store(request.SessionID, database{databasePointer: db, databaseName: name})
 	case network.LoadDatabase:
 		name := request.Response.Data
-		db, err := data.LoadDatabase(name)
+		db, err := data.LoadDatabase(filepath.Join(settings.Root, name))
 		if err != nil {
 			fmt.Print(err)
 			return
@@ -85,14 +85,9 @@ func handleRequest(server *network.Server, request network.Request) {
 			fmt.Println(databaseFile.Name())
 		}
 
-		pathS, err := os.Getwd()
-		if err != nil {
-			panic(err)
-		}
-
 		databaseMetaArray := make([]databaseMeta, 0)
 		for _, databaseFile := range databasesFiles {
-			fmt.Println("sending:", filepath.Join(pathS+"/databases/", databaseFile.Name()))
+			fmt.Println("sending:", filepath.Join(settings.Root, databaseFile.Name()))
 			db, err := data.LoadDatabase(filepath.Join(settings.Root, databaseFile.Name()))
 			if err != nil {
 				fmt.Println("Error loading database ", databaseFile.Name(), err)
@@ -132,10 +127,16 @@ func handleRequest(server *network.Server, request network.Request) {
 						server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
 						return
 					}
-					table := result.(*data.Table)
-					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Table Created " + table.TableName})
+					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Table Created"})
 				}
 			case *common.DeleteCommand:
+				function = func(result interface{}, err error) {
+					if err != nil {
+						server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
+						return
+					}
+					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Data Deleted"})
+				}
 			case *common.InsertCommand:
 				function = func(result interface{}, err error) {
 					if err != nil {
@@ -145,6 +146,13 @@ func handleRequest(server *network.Server, request network.Request) {
 					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Data Inserted"})
 				}
 			case *common.UpdateTableCommand:
+				function = func(result interface{}, err error) {
+					if err != nil {
+						server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
+						return
+					}
+					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Data Updated"})
+				}
 			case *common.SelectTableCommand:
 				function = func(result interface{}, err error) {
 					if err != nil {
@@ -154,6 +162,14 @@ func handleRequest(server *network.Server, request network.Request) {
 
 					resultJSON, _ := json.Marshal(result)
 					server.Send(request.SessionID, network.Response{Type: network.Query, Data: string(resultJSON)})
+				}
+			case *common.DropCommand:
+				function = func(result interface{}, err error) {
+					if err != nil {
+						server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
+						return
+					}
+					server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Table Dropped"})
 				}
 			}
 			commandsArray = append(commandsArray, databaseTemp.(database).databasePointer.CommandFactory(command, function))
@@ -177,7 +193,7 @@ func handleRequest(server *network.Server, request network.Request) {
 		}
 	case network.DropDb:
 		name := request.Response.Data
-		err := deleteDatabase(name, settings.Port)
+		err := deleteDatabase(name)
 		if err != nil {
 			fmt.Print(err)
 			return
@@ -195,8 +211,8 @@ func listDatabases(path string) ([]os.FileInfo, error) {
 	return files, err
 }
 
-func deleteDatabase(name string, path string) error {
-	err := os.Remove(path + name)
+func deleteDatabase(name string) error {
+	err := os.Remove(filepath.Join(settings.Root, name))
 	return err
 }
 
