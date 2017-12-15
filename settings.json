@@ -3,5 +3,6 @@
     "Host" : "",
     "Port" : "3333",
     "Root" : "./databases/",
-    "MaxSessions"  : 10
+    "MaxSessions"  : 10,
+    "BlockSize": 131072
 }

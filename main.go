@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ type config struct {
 	Port        string
 	Root        string
 	MaxSessions int
+	BlockSize   int64
 }
 
 type databaseMeta struct {
@@ -54,7 +56,7 @@ func handleRequest(server *network.Server, request network.Request) {
 		server.Send(request.SessionID, network.Response{Type: network.KeepAlive, Data: "Alive"})
 	case network.NewDatabase:
 		name := request.Response.Data
-		db, err := data.NewDatabase(name)
+		db, err := data.NewDatabase(filepath.Join(settings.Root, name), settings.BlockSize)
 		if err != nil {
 			fmt.Print(err)
 			return
@@ -71,26 +73,32 @@ func handleRequest(server *network.Server, request network.Request) {
 	case network.NewTable:
 	case network.FindTable:
 	case network.GetMetadata:
-
+		fmt.Println("getting metadata")
 		databasesFiles, err := listDatabases(settings.Root)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
 
+		fmt.Println("printing databse")
+		for _, databaseFile := range databasesFiles {
+			fmt.Println(databaseFile.Name())
+		}
+
+		pathS, err := os.Getwd()
+		if err != nil {
+			panic(err)
+		}
+
 		databaseMetaArray := make([]databaseMeta, 0)
 		for _, databaseFile := range databasesFiles {
-
-			db, err := data.LoadDatabase(databaseFile.Name())
+			fmt.Println("sending:", filepath.Join(pathS+"/databases/", databaseFile.Name()))
+			db, err := data.LoadDatabase(filepath.Join(settings.Root, databaseFile.Name()))
 			if err != nil {
 				fmt.Println("Error loading database ", databaseFile.Name(), err)
 				return
 			}
-			tables, err := db.AllTables()
-			if err != nil {
-				fmt.Println("Error geting tables", databaseFile.Name(), err)
-				return
-			}
+			tables := db.AllTables()
 			databaseMetaArray = append(databaseMetaArray, databaseMeta{DatabaseName: databaseFile.Name(), Tables: tables})
 		}
 
@@ -143,8 +151,8 @@ func handleRequest(server *network.Server, request network.Request) {
 						server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
 						return
 					}
-					resultset := result.(*data.ResultSet)
-					resultJSON, _ := json.Marshal(resultset.Rows)
+
+					resultJSON, _ := json.Marshal(result)
 					server.Send(request.SessionID, network.Response{Type: network.Query, Data: string(resultJSON)})
 				}
 			}
@@ -167,6 +175,13 @@ func handleRequest(server *network.Server, request network.Request) {
 		if ok {
 			databases.Delete(request.SessionID)
 		}
+	case network.DropDb:
+		name := request.Response.Data
+		err := deleteDatabase(name, settings.Port)
+		if err != nil {
+			fmt.Print(err)
+			return
+		}
 	}
 
 }
@@ -180,7 +195,13 @@ func listDatabases(path string) ([]os.FileInfo, error) {
 	return files, err
 }
 
+func deleteDatabase(name string, path string) error {
+	err := os.Remove(path + name)
+	return err
+}
+
 func main() {
+
 	fmt.Println("Starting server")
 	server := network.NewServer()
 
@@ -212,4 +233,5 @@ func main() {
 			server.Join(conn)
 		}
 	}
+
 }
