@@ -6,6 +6,7 @@
     "MaxSessions"  : 10,
     "EnableLogging": true,
     "BlockSize": 4096,
-    "excecution_delay" : 0,
-    "execution_batch_size" : 16
+    "ExecutionDelay" : 1,
+    "ExecutionBatchSize" : 16,
+    "InstructionsPerTransaction": 5
 }
