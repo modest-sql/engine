@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -106,11 +106,12 @@ func deleteDatabase(name string, path string) error {
 }
 
 type config struct {
-	Host        string
-	Port        string
-	Root        string
-	MaxSessions int
-	BlockSize   int64
+	Host          string
+	Port          string
+	Root          string
+	MaxSessions   int
+	BlockSize     int64
+	EnableLogging bool
 }
 
 var dbmanager DBManager
@@ -119,7 +120,7 @@ var settings = loadConfig("settings.json")
 func loadConfig(path string) (c config) {
 	raw, err := ioutil.ReadFile(path)
 	if err != nil {
-		fmt.Println(err.Error())
+		log.Println(err.Error())
 		os.Exit(1)
 	}
 	json.Unmarshal(raw, &c)
@@ -148,7 +149,7 @@ func handleRequest(server *network.Server, request network.Request) {
 		databaseMetaArray := dbmanager.getMetadata()
 		databaseMetaArrayJSON, err := json.Marshal(databaseMetaArray)
 		if err != nil {
-			fmt.Println("Error encoding metadata:", err)
+			log.Println("Error encoding metadata:", err)
 		}
 		server.Send(request.SessionID, network.Response{Type: network.GetMetadata, Data: "{Databases:" + string(databaseMetaArrayJSON) + "}"})
 	case network.Query:
@@ -230,20 +231,20 @@ func handleRequest(server *network.Server, request network.Request) {
 		transactions := transaction.GetTransactions()
 		transactionsJSON, err := json.Marshal(transactions)
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 		}
 		server.Send(request.SessionID, network.Response{Type: network.ShowTransaction, Data: "{Transactions:" + string(transactionsJSON) + "}"})
 	case network.Error:
 	case network.SessionExited:
 		err := dbmanager.unpair(request.SessionID)
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 			return
 		}
 	case network.DropDb:
 		err := deleteDatabase(request.Response.Data, settings.Root)
 		if err != nil {
-			fmt.Print(err)
+			log.Print(err)
 			return
 		}
 	}
@@ -251,18 +252,23 @@ func handleRequest(server *network.Server, request network.Request) {
 }
 
 func init() {
+	if !settings.EnableLogging {
+		log.SetFlags(0)
+		log.SetOutput(ioutil.Discard)
+	}
+
 	go transaction.StartTransactionManager()
 }
 
 func main() {
-	fmt.Println("Loading Databases")
+	log.Println("Loading Databases")
 	err := dbmanager.loadAllDatabases(settings.Root)
 	if err != nil {
-		fmt.Println("Error loading databses. Exiting", err)
+		log.Println("Error loading databses. Exiting", err)
 		return
 	}
 
-	fmt.Println("Starting server")
+	log.Println("Starting server")
 	server := network.NewServer()
 
 	go func() {
@@ -276,7 +282,7 @@ func main() {
 
 	listener, err := net.Listen("tcp", settings.Host+":"+settings.Port)
 	if err != nil {
-		fmt.Println("Server Listener failed. Exiting.", err)
+		log.Println("Server Listener failed. Exiting.", err)
 		os.Exit(1)
 	}
 
@@ -284,12 +290,12 @@ func main() {
 		if settings.MaxSessions > server.GetSessionsAmount() {
 			conn, err := listener.Accept()
 			if err != nil {
-				fmt.Println("Connection accepting failed.")
+				log.Println("Connection accepting failed.")
 				conn.Close()
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
-			fmt.Println("A new connection accepted.")
+			log.Println("A new connection accepted.")
 			server.Join(conn)
 		}
 	}
