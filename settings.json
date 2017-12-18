@@ -4,7 +4,8 @@
     "Port" : "3333",
     "Root" : "./databases/",
     "MaxSessions"  : 10,
+    "EnableLogging": true,
     "BlockSize": 4096,
-    "excecution_delay" : 1,
-    "execution_batch_size" : 2
+    "excecution_delay" : 0,
+    "execution_batch_size" : 16
 }
