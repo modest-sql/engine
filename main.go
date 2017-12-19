@@ -86,6 +86,38 @@ func (DBM *DBManager) unpair(sessionID int64) (err error) {
 	return errors.New("Database specified wasn't found")
 }
 
+//deleteDatabase deletes the database file ans unpairs all sessions
+func (DBM *DBManager) deleteDatabase(name string, path string) error {
+
+	dbpointer, ok := DBM.databases.Load(name)
+	if ok {
+		sessionToUnpair := make([]int64, 0)
+		DBM.paired.Range(func(ki, vi interface{}) bool {
+			k, v := ki.(int64), vi.(*data.Database)
+			if v == dbpointer {
+				sessionToUnpair = append(sessionToUnpair, k)
+			}
+			return true
+		})
+		for sessionID := range sessionToUnpair {
+			err := DBM.unpair(int64(sessionID))
+			if err != nil {
+				return err
+			}
+		}
+		DBM.databases.Delete(name)
+	} else {
+		return errors.New("Pointer to database not found")
+	}
+
+	err := deleteDatabaseFile(name, path)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 //GetPair gets the linked db pointer that was paired with id
 func (DBM *DBManager) getPair(sessionID int64) (*data.Database, error) {
 	dbpointer, ok := DBM.paired.Load(sessionID)
@@ -100,7 +132,7 @@ func listDatabases(path string) ([]os.FileInfo, error) {
 	return files, err
 }
 
-func deleteDatabase(name string, path string) error {
+func deleteDatabaseFile(name string, path string) error {
 	err := os.Remove(filepath.Join(path, name))
 	return err
 }
@@ -242,11 +274,12 @@ func handleRequest(server *network.Server, request network.Request) {
 			return
 		}
 	case network.DropDb:
-		err := deleteDatabase(request.Response.Data, settings.Root)
+		err := dbmanager.deleteDatabase(request.Response.Data, settings.Root)
 		if err != nil {
-			log.Print(err)
+			server.Send(request.SessionID, network.Response{Type: network.Error, Data: err.Error()})
 			return
 		}
+		server.Send(request.SessionID, network.Response{Type: network.Notification, Data: "Database " + request.Response.Data + " deleted."})
 	}
 
 }
